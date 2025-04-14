@@ -12,7 +12,7 @@ def load_and_filter_data(file_path="PFC_RECLTD_feature_set.csv"):
     df = df.sort_values('timestamp')
 
     # Localize the start_date to the same timezone as the timestamp column
-    start_date = pd.to_datetime("2023-03-01").tz_localize("Asia/Kolkata")
+    start_date = pd.to_datetime("2017-07-04").tz_localize("Asia/Kolkata")
 
     # Filter dataset for timestamps on or after April 1, 2024
     df_filtered = df[df['timestamp'] >= start_date].copy()

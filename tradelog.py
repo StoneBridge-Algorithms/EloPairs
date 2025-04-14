@@ -16,6 +16,17 @@ print(df_filtered.columns)
 # Reset the index so that it becomes 0, 1, 2, …
 df_filtered = df_filtered.reset_index(drop=True)
 
+# tradelog.py
+from turbulence_calc import load_turbulence_data
+import pandas as pd
+
+# Use the function to load the turbulence DataFrame
+turbulence_df = load_turbulence_data()
+print(turbulence_df.head())
+
+# Merge DataFrame B with the desired column from DataFrame A on the 'id' column
+df_filtered = df_filtered.merge(turbulence_df[['timestamp', 'turbulence']], on='timestamp', how='left')
+
 trades = []
 position_open = False
 entry_details = {}
@@ -28,6 +39,16 @@ for i in range(1, len(df_filtered)):
     prev_norm_elo = df_filtered.loc[i-1, 'elo_diff_normalize']
     current_norm_elo = df_filtered.loc[i, 'elo_diff_normalize']
     elo_change = current_norm_elo - prev_norm_elo
+    
+    # Get current market turbulence from the filtered DataFrame
+    current_turbulence = df_filtered.loc[i, 'turbulence']
+    
+    # Determine position multiplier if you want to adjust size by turbulence (example below)
+    turbulence_threshold = 1.0
+    if current_turbulence < turbulence_threshold:
+        multiplier = 1.0  # full exposure
+    else:
+        multiplier = turbulence_threshold / current_turbulence  # reduced exposure
     
     if not position_open:
         # ENTRY condition for a short spread trade:
@@ -44,7 +65,9 @@ for i in range(1, len(df_filtered)):
                 'Entry Normalized Elo Diff': current_norm_elo,
                 'Elo Change at Entry': elo_change,
                 'Entry PFC Price': entry_pfc,
-                'Entry RECLTD Price': entry_recltd
+                'Entry RECLTD Price': entry_recltd,
+                'Market Turbulence at Entry': current_turbulence,
+                'Position Multiplier': multiplier
             }
         # ENTRY condition for a long spread trade:
         # When z_score <= -1.5 and the normalized Elo difference rises (change >= 0.38)
@@ -60,11 +83,13 @@ for i in range(1, len(df_filtered)):
                 'Entry Normalized Elo Diff': current_norm_elo,
                 'Elo Change at Entry': elo_change,
                 'Entry PFC Price': entry_pfc,
-                'Entry RECLTD Price': entry_recltd
+                'Entry RECLTD Price': entry_recltd,
+                'Market Turbulence at Entry': current_turbulence,
+                'Position Multiplier': multiplier
             }
     else:
         if trade_type == 'short_spread':
-            # EXIT condition for a short spread trade:
+            # EXIT condition for short spread trade:
             # When z_score <= -1.5 and the normalized Elo difference reverses (change >= 0.38)
             if current_z <= -1.5 and elo_change >= 0.38:
                 exit_pfc = df_filtered.loc[i, 'close_PFC']
@@ -75,14 +100,13 @@ for i in range(1, len(df_filtered)):
                     'Exit Normalized Elo Diff': current_norm_elo,
                     'Elo Change at Exit': elo_change,
                     'Exit PFC Price': exit_pfc,
-                    'Exit RECLTD Price': exit_recltd
+                    'Exit RECLTD Price': exit_recltd,
+                    'Market Turbulence at Exit': current_turbulence
                 }
-                # Calculate number of shares per trade (dollar neutral approach)
-                # For simplicity: use shares = invested_capital / (Entry PFC Price + Entry RECLTD Price)
-                shares = invested_capital / (entry_details['Entry PFC Price'] + entry_details['Entry RECLTD Price'])
-                # Aggregate PnL calculation for short spread trade:
-                # PnL = shares * [ (Entry PFC Price - Exit PFC Price) + (Exit RECLTD Price - Entry RECLTD Price) ]
-                pnl = shares * ((entry_details['Entry PFC Price'] - exit_pfc) + (exit_recltd - entry_details['Entry RECLTD Price']))
+                # Calculate number of shares using position sizing with the multiplier:
+                shares = multiplier * (invested_capital / (entry_details['Entry PFC Price'] + entry_details['Entry RECLTD Price']))
+                # PnL for short spread:
+                pnl = shares * ((entry_details['Entry PFC Price'] - exit_pfc) + beta * (exit_recltd - entry_details['Entry RECLTD Price']))
                 trade = {**entry_details, **exit_details, 'PnL': pnl, 'Shares': shares}
                 trades.append(trade)
                 position_open = False
@@ -100,13 +124,12 @@ for i in range(1, len(df_filtered)):
                     'Exit Normalized Elo Diff': current_norm_elo,
                     'Elo Change at Exit': elo_change,
                     'Exit PFC Price': exit_pfc,
-                    'Exit RECLTD Price': exit_recltd
+                    'Exit RECLTD Price': exit_recltd,
+                    'Market Turbulence at Exit': current_turbulence
                 }
-                # Calculate number of shares per trade as above
-                shares = invested_capital / (entry_details['Entry PFC Price'] + entry_details['Entry RECLTD Price'])
-                # Aggregate PnL calculation for long spread trade:
-                # PnL = shares * [ (Exit PFC Price - Entry PFC Price) + (Entry RECLTD Price - Exit RECLTD Price) ]
-                pnl = shares * ((exit_pfc - entry_details['Entry PFC Price']) + (entry_details['Entry RECLTD Price'] - exit_recltd))
+                shares = multiplier * (invested_capital / (entry_details['Entry PFC Price'] + entry_details['Entry RECLTD Price']))
+                # PnL for long spread:
+                pnl = shares * ((exit_pfc - entry_details['Entry PFC Price']) + beta * (entry_details['Entry RECLTD Price'] - exit_recltd))
                 trade = {**entry_details, **exit_details, 'PnL': pnl, 'Shares': shares}
                 trades.append(trade)
                 position_open = False
@@ -167,9 +190,8 @@ if __name__ == '__main__':
     print(equity_curve.head())
     
     # Calculate percentage return based on invested capital per trade
-    # Here, since each trade uses a position sized to the invested capital, we evaluate overall performance on the aggregated PnL.
     final_cumulative_pnl = equity_curve['Cumulative PnL'].iloc[-1]
-    final_equity = invested_capital + final_cumulative_pnl  # This represents the net change when using full capital each trade
+    final_equity = invested_capital + final_cumulative_pnl
     percentage_return = (final_equity - invested_capital) / invested_capital * 100
     print("Invested Capital per Trade: ", invested_capital)
     print("Final Equity Value: ", final_equity)

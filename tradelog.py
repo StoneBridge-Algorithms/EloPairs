@@ -24,7 +24,9 @@ import pandas as pd
 turbulence_df = load_turbulence_data()
 print(turbulence_df.head())
 
-# Merge DataFrame B with the desired column from DataFrame A on the 'id' column
+turbulence_df['timestamp'] = pd.to_datetime(turbulence_df['timestamp']).dt.tz_localize('Asia/Kolkata')
+
+# Merge on the 'timestamp' column
 df_filtered = df_filtered.merge(turbulence_df[['timestamp', 'turbulence']], on='timestamp', how='left')
 
 trades = []
@@ -184,6 +186,56 @@ def plot_equity_curve(equity_curve):
     
     fig.show()
 
+def plot_equity_and_turbulence(equity_curve, df_filtered):
+    """
+    Overlays Cumulative PnL and Turbulence on a single plot 
+    with two y-axes (left = PnL, right = Turbulence).
+    """
+    fig = go.Figure()
+    
+    # 1) Plot your cumulative PnL (y-axis 1)
+    fig.add_trace(go.Scatter(
+        x=equity_curve.index, 
+        y=equity_curve['Cumulative PnL'],
+        mode='lines',
+        name='Cumulative PnL',
+        line=dict(color='green', width=2),
+        yaxis='y1'
+    ))
+    
+    # 2) Plot the turbulence index (y-axis 2)
+    fig.add_trace(go.Scatter(
+        x=df_filtered['timestamp'],
+        y=df_filtered['turbulence'],
+        mode='lines',
+        name='Turbulence',
+        line=dict(color='firebrick', width=2),
+        yaxis='y2'
+    ))
+    
+    # 3) Configure layout for two y-axes
+    fig.update_layout(
+        title="Cumulative PnL & Market Turbulence Over Time",
+        template="plotly_white",
+        width=1200,
+        height=600,
+        xaxis=dict(
+            domain=[0.0, 1.0], 
+            title='Date'
+        ),
+        yaxis=dict(
+            title='Cumulative PnL', 
+            side='left'
+        ),
+        yaxis2=dict(
+            title='Turbulence Index',
+            side='right',
+            overlaying='y'   # overlay on same x-axis
+        )
+    )
+    
+    fig.show()
+
 if __name__ == '__main__':
     # Build the equity curve from the trade log data
     equity_curve = build_equity_curve(trade_log_df)
@@ -199,3 +251,4 @@ if __name__ == '__main__':
     
     # Plot the equity curve
     plot_equity_curve(equity_curve)
+    plot_equity_and_turbulence(equity_curve, df_filtered)
